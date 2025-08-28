@@ -1,102 +1,105 @@
 import streamlit as st
 import tempfile
-import subprocess
-import fitz  # PyMuPDF
-import re
-import csv
 import os
+import pandas as pd
+import fitz  # PyMuPDF
+import pytesseract
+import ocrmypdf
+import re
+from PyPDF2 import PdfReader, PdfWriter
+from datetime import datetime
 
-# Função para rodar OCR no PDF
-def rodar_ocr(input_path, output_path):
-    try:
-        result = subprocess.run(
-            ["ocrmypdf", "--skip-text", "-l", "por", input_path, output_path],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode != 0:
-            st.error(f"Erro ao rodar OCR em {input_path}: {result.stderr}")
-            return False
-        return True
-    except Exception as e:
-        st.error(f"Erro inesperado ao rodar OCR: {e}")
-        return False
-
-# Função para anonimizar PDF (com tarja preta)
-def anonimizar_pdf(input_path, output_path, termos, csv_path):
-    doc = fitz.open(input_path)
-    achados = []
-
-    for page_num, page in enumerate(doc, start=1):
+# =========================
+# Funções de Anonimização
+# =========================
+def redact_pdf(input_pdf_path, output_pdf_path, words_to_redact):
+    """Apaga/mancha palavras e padrões do PDF"""
+    doc = fitz.open(input_pdf_path)
+    log = []
+    for page_num, page in enumerate(doc):
         text_instances = []
-        for termo in termos:
-            termo_regex = re.compile(re.escape(termo), re.IGNORECASE)
-            for match in page.search_for(termo):
-                text_instances.append((termo, match))
+        for word in words_to_redact:
+            text_instances.extend(page.search_for(word))
+        # Padrões comuns
+        patterns = {
+            r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b": "CPF",
+            r"\b\d{2}\.\d{3}\.\d{3}-\d\b": "RG",
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}": "Email",
+            r"\(?\d{2}\)?\s?\d{4,5}-\d{4}": "Telefone",
+        }
+        for pattern, label in patterns.items():
+            for match in re.finditer(pattern, page.get_text()):
+                text_instances.append(page.search_for(match.group()))
+                log.append({"Page": page_num+1, "Type": label, "Value": match.group()})
 
-        for termo, inst in text_instances:
-            # Aplica tarja preta
+        for inst in text_instances:
             page.add_redact_annot(inst, fill=(0, 0, 0))
-            achados.append({"pagina": page_num, "termo": termo})
-
         page.apply_redactions()
 
-    doc.save(output_path)
+    doc.save(output_pdf_path)
+    doc.close()
+    return log
 
-    # Salvar CSV com os termos achados
-    if achados:
-        with open(csv_path, mode="w", newline="", encoding="utf-8") as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=["pagina", "termo"])
-            writer.writeheader()
-            writer.writerows(achados)
+# =========================
+# Streamlit Interface
+# =========================
+st.title("Anonimizador de PDFs com OCR")
+st.write("Faça upload de PDFs, o app vai aplicar OCR e anonimizar CPF, RG, emails, telefones e palavras que você definir.")
 
-# ------------------------------
-# Interface Streamlit
-# ------------------------------
-st.title("📑 OCR + Anonimização de PDFs")
+uploaded_files = st.file_uploader("Selecione PDFs", type=["pdf"], accept_multiple_files=True)
 
-uploaded_files = st.file_uploader("Selecione arquivos PDF", type=["pdf"], accept_multiple_files=True)
+extra_words = st.text_area("Palavras adicionais para anonimizar (separe por vírgula)").split(",")
 
-termos_input = st.text_area("Digite os termos a anonimizar (separados por vírgula)", "CPF, RG, CNPJ, Processo")
-termos = [t.strip() for t in termos_input.split(",") if t.strip()]
-
-if uploaded_files and termos:
+if st.button("Processar PDFs") and uploaded_files:
+    all_logs = []
     for uploaded_file in uploaded_files:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_in:
-            tmp_in.write(uploaded_file.read())
-            input_path = tmp_in.name
+        st.info(f"Processando {uploaded_file.name}...")
 
-        ocr_path = tempfile.NamedTemporaryFile(delete=False, suffix="_ocr.pdf").name
-        anon_path = tempfile.NamedTemporaryFile(delete=False, suffix="_anon.pdf").name
-        csv_path = tempfile.NamedTemporaryFile(delete=False, suffix=".csv").name
+        # Criar arquivos temporários
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = os.path.join(tmpdir, uploaded_file.name)
+            uploaded_file.seek(0)
+            with open(input_path, "wb") as f:
+                f.write(uploaded_file.read())
 
-        # Passo 1: OCR
-        if rodar_ocr(input_path, ocr_path):
-            # Passo 2: Anonimização
-            anonimizar_pdf(ocr_path, anon_path, termos, csv_path)
+            ocr_path = os.path.join(tmpdir, "ocr_" + uploaded_file.name)
 
-            st.success(f"Processado: {uploaded_file.name}")
+            # Rodar OCR
+            try:
+                ocrmypdf.ocr(
+                    input_path,
+                    ocr_path,
+                    language="por",
+                    force_ocr=True,
+                    redo_ocr=True
+                )
+            except Exception as e:
+                st.warning(f"Erro ao rodar OCR em {uploaded_file.name}: {e}")
+                continue
 
-            with open(anon_path, "rb") as f:
+            # Anonimizar
+            words_to_redact = [w.strip() for w in extra_words if w.strip()]
+            log = redact_pdf(ocr_path, os.path.join(tmpdir, "anon_" + uploaded_file.name), words_to_redact)
+            for item in log:
+                item["File"] = uploaded_file.name
+            all_logs.extend(log)
+
+            # Botão para download do PDF anonimizador
+            with open(os.path.join(tmpdir, "anon_" + uploaded_file.name), "rb") as f:
                 st.download_button(
-                    label=f"⬇️ Baixar PDF anonimizado ({uploaded_file.name})",
+                    label=f"Download PDF Anonimizado: {uploaded_file.name}",
                     data=f,
-                    file_name=f"{os.path.splitext(uploaded_file.name)[0]}_anon.pdf",
+                    file_name="anon_" + uploaded_file.name,
                     mime="application/pdf"
                 )
 
-            with open(csv_path, "rb") as f:
-                st.download_button(
-                    label=f"⬇️ Baixar CSV ({uploaded_file.name})",
-                    data=f,
-                    file_name=f"{os.path.splitext(uploaded_file.name)[0]}_achados.csv",
-                    mime="text/csv"
-                )
-                
-if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8501))
-    import streamlit.web.cli as stcli
-    import sys
-    sys.argv = ["streamlit", "run", "app.py", "--server.port", str(port), "--server.address", "0.0.0.0"]
-    stcli.main()
+    # Gerar CSV de log
+    if all_logs:
+        df_log = pd.DataFrame(all_logs)
+        csv_name = f"log_anonimizacao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        st.download_button(
+            label="Download CSV de Log",
+            data=df_log.to_csv(index=False).encode("utf-8"),
+            file_name=csv_name,
+            mime="text/csv"
+        )
