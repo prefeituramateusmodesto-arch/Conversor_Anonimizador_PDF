@@ -1,0 +1,6 @@
+tesseract-ocr
+tesseract-ocr-por
+ocrmypdf
+poppler-utils
+ghostscript
+qpdf
