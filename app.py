@@ -92,3 +92,11 @@ if uploaded_files and termos:
                     file_name=f"{os.path.splitext(uploaded_file.name)[0]}_achados.csv",
                     mime="text/csv"
                 )
+                
+if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 8501))
+    import streamlit.web.cli as stcli
+    import sys
+    sys.argv = ["streamlit", "run", "app.py", "--server.port", str(port), "--server.address", "0.0.0.0"]
+    stcli.main()
