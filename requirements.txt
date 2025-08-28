@@ -1,8 +1,8 @@
 streamlit
-ocrmypdf
-pytesseract
-PyPDF2
 pandas
-pymupdf
+PyPDF2
 pdfplumber
-pillow
+pytesseract
+PyMuPDF
+ocrmypdf
+Pillow
