@@ -3,3 +3,6 @@ ocrmypdf
 pytesseract
 PyPDF2
 pandas
+pymupdf
+pdfplumber
+pillow
