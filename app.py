@@ -103,3 +103,22 @@ if st.button("Processar PDFs") and uploaded_files:
             file_name=csv_name,
             mime="text/csv"
         )
+    
+    if __name__ == "__main__":
+    import os
+    import sys
+    import streamlit.web.cli as stcli
+
+    # Pega a porta do Render ou usa 8501 localmente
+    port = int(os.environ.get("PORT", 8501))
+
+    # Configura os argumentos do Streamlit
+    sys.argv = [
+        "streamlit",
+        "run",
+        "app.py",
+        "--server.port", str(port),
+        "--server.address", "0.0.0.0"
+    ]
+
+    stcli.main()
