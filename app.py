@@ -47,7 +47,6 @@ st.title("Anonimizador de PDFs com OCR")
 st.write("Faça upload de PDFs, o app vai aplicar OCR e anonimizar CPF, RG, emails, telefones e palavras que você definir.")
 
 uploaded_files = st.file_uploader("Selecione PDFs", type=["pdf"], accept_multiple_files=True)
-
 extra_words = st.text_area("Palavras adicionais para anonimizar (separe por vírgula)").split(",")
 
 if st.button("Processar PDFs") and uploaded_files:
@@ -103,9 +102,11 @@ if st.button("Processar PDFs") and uploaded_files:
             file_name=csv_name,
             mime="text/csv"
         )
-    
-    if __name__ == "__main__":
-    import os
+
+# =========================
+# Configuração para Render
+# =========================
+if __name__ == "__main__":
     import sys
     import streamlit.web.cli as stcli
 
